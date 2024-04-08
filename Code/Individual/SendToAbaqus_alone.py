@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 from matplotlib import pyplot as plt
 from abaqus import *
@@ -8,14 +9,30 @@ from driverUtils import executeOnCaeStartup
 ########################################################################
 # PARAMETERS TO CHANGE FOR TRIALS
 
-#ITERATION_NUMBER = 10 all points must be connected from the previous one
-partition = False
+#ITERATION_NUMBER = 10 
+partition = True
+JOB_NAME = 'CantileverThicknessTest_partitiontruequad'
+second_accuracy = True
+submit_job = True
+variable_name = 'U'
+MESH_SIZE = 1
+# Conditions for POINTS: counter-clockwise. Last edge will be pinned (POINT_4 TO POINT_1)
+# all points must be connected to the previous one
 POINT_1 = (0.0, 0.0)
-POINT_2 = (100.0, 0.0)
-POINT_3 = (100.0, 10.0)
-POINT_4 = (0.0, 10.0)
+POINT_2 = (10.0, 0.0)
+#POINT_3 = (0.0, 100.0)
+POINT_3 = (10.0, 1.0)
+POINT_4 = (0.0, 1.0)
+#GEOMETRY = [POINT_1, POINT_2, POINT_3]
 GEOMETRY = [POINT_1, POINT_2, POINT_3, POINT_4]
-output_filename = 'C:\Temp/SubdivisionCoordinatesCantilever.txt'
+# Extracting data from createSubdivision
+partition_filename = 'C:\Temp/cantilevergeometrypartition.txt'
+input_file_path = partition_filename
+loaded_data = np.loadtxt(input_file_path, delimiter=',')
+x = loaded_data[:, 0]
+y = loaded_data[:, 1]
+ACTIVE_ANGLE_ARRAY = np.linspace(0, 0, len(x)//4)
+PASSIVE_ANGLE_ARRAY = np.linspace(90, 90, len(x)//4)
 
 ########################################################################
 # PARAMETERS FOR THE CODE
@@ -23,13 +40,6 @@ output_filename = 'C:\Temp/SubdivisionCoordinatesCantilever.txt'
 
 MODEL_NAME = 'Model-1'
 PART_NAME = 'Part-1'
-
-# Extracting data from createSubdivision
-input_file_path = output_filename
-loaded_data = np.loadtxt(input_file_path, delimiter=',')
-x = loaded_data[:, 0]
-y = loaded_data[:, 1]
-ACTIVE_ANGLE_ARRAY = np.linspace(90, 90, len(x)//4)
 
 ## Elastic material properties (not using passive at the moment)
 # (quoted from Design of 3D and 4D printed continuous fibre composites via an evolutionary algorithm 
@@ -56,44 +66,48 @@ G12_ACTIVE = 986.0
 G13_ACTIVE = 986.0
 G23_ACTIVE = 982.6
 ## Expansion
+MC = 0.552
 ALPHA_EXPANSION_PASSIVE = 0.01
-ALPHA_EXPANSION_ACTIVE_12 = -0.0071
-ALPHA_EXPANSION_ACTIVE_13 = 0.394
-ALPHA_EXPANSION_ACTIVE_23 = 0.394
+ALPHA_EXPANSION_ACTIVE_12 = 0.0171
+ALPHA_EXPANSION_ACTIVE_13 = 0.2156
+ALPHA_EXPANSION_ACTIVE_23 = 0.6385  
 ## Conductivity
 ALPHA_CONDUCTIVITY_PASSIVE = 0.01
-ALPHA_CONDUCTIVITY_ACTIVE = 100.0
-## Specific Heat
+ALPHA_CONDUCTIVITY_ACTIVE = 10000
+## Specific Heat J/(kg K)
 SP_HEAT_PASSIVE = 1200.0
 SP_HEAT_ACTIVE = 1800.0
-## Density
-DENSITY_PASSIVE = 1.6
-DENSITY_ACTIVE = 1.5
+## Density kg/mm^3
+DENSITY_PASSIVE = 5*10**(-7)
+DENSITY_ACTIVE = 5*10**(-7)
 # CreatePartition and CreateMaterialSubdivision()
 PASSIVE_MATERIAL_NAME = 'Passive'
 ACTIVE_MATERIAL_NAME = 'Active'
 COMPOSITE_LAYUP_NAME = 'CompositeLayup-1'
-THICKNESS_PASSIVE = 0.2
-THICKNESS_ACTIVE = 0.1
-ANGLEPLY_PASSIVE = 0.0
-ANGLEPLY_ACTIVE = 90.0
+THICKNESS_PASSIVE = 2 #mm
+THICKNESS_ACTIVE = 1 #mm
+ANGLEPLY_PASSIVE = 90.0
+ANGLEPLY_ACTIVE = 0.0
 # CreateAssembly()
 ASSEMBLY_NAME = 'Assembly-1'
 # CreateMesh()
-MESH_SIZE = 1.0
+MESH_SIZE = 1
 # CreateStep()
 STEP_NAME = 'Step-1'
 STEP_INITIAL_NAME = 'Initial'
 # CreateBoundaryConditions()
-MAGNITUDE_TEMPERATURE_END = 0.0577
+MAGNITUDE_TEMPERATURE_END = 0.552
 ################################################################
 executeOnCaeStartup()
+sys.stdout = sys.__stdout__
+
 def CreatePart(MODEL_NAME, PART_NAME, GEOMETRY):
+    NEW_MODEL = mdb.Model(name=MODEL_NAME)
     s = mdb.models[MODEL_NAME].ConstrainedSketch(name='__profile__', 
     sheetSize=200.0)
     g, v, d, c = s.geometry, s.vertices, s.dimensions, s.constraints
     s.setPrimaryObject(option=STANDALONE)
-    for i in range(0, len(GEOMETRY), 1):
+    for i in range(0, len(GEOMETRY)):
         if i == len(GEOMETRY)-1:
             s.Line(point1=GEOMETRY[i], point2=GEOMETRY[0])
             continue
@@ -145,7 +159,7 @@ def CreateAssembly(MODEL_NAME, PART_NAME, ASSEMBLY_NAME):
     a.Instance(name=ASSEMBLY_NAME, part=p, dependent=OFF)
     session.viewports['Viewport: 1'].setValues(displayedObject=a)
 
-def CreatePartition(MODEL_NAME, PART_NAME, x, y):
+def CreatePartition(MODEL_NAME, PART_NAME, x, y, partition=True):
     if partition:
         p = mdb.models[MODEL_NAME].parts[PART_NAME]
         f, e, d = p.faces, p.edges, p.datums
@@ -167,16 +181,14 @@ def CreatePartition(MODEL_NAME, PART_NAME, x, y):
     else:
         pass
 
-    
-
-def CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, ACTIVE_ANGLE_ARRAY):
+def CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, PASSIVE_ANGLE_ARRAY, ACTIVE_ANGLE_ARRAY, THICKNESS_PASSIVE=THICKNESS_PASSIVE, THICKNESS_ACTIVE=THICKNESS_ACTIVE, partition=True):
     if partition:
         for i in range(0, len(x)//4, 1):
             compositeLayup = mdb.models[MODEL_NAME].parts[PART_NAME].CompositeLayup(
             name='Subsection-{}'.format(i), description='', elementType=SHELL, 
             offsetType=MIDDLE_SURFACE, symmetric=False, 
             thicknessAssignment=FROM_SECTION)
-            compositeLayup.Section(preIntegrate=OFF, integrationRule=SIMPSON, 
+            compositeLayup.Section(preIntegrate=OFF, integrationRule=SIMPSON,
             thicknessType=UNIFORM, poissonDefinition=DEFAULT, temperature=GRADIENT, 
             useDensity=OFF)
             compositeLayup.ReferenceOrientation(orientationType=GLOBAL, localCsys=None, 
@@ -191,7 +203,7 @@ def CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, ACTIVE_ANGLE_ARRAY
             region1 = regionToolset.Region(faces=faces)
             compositeLayup.CompositePly(suppressed=False, plyName='Subsection-{}-Bottom'.format(i), region=region1,
                 material='Active', thicknessType=SPECIFY_THICKNESS, thickness=THICKNESS_PASSIVE, 
-                orientationType=SPECIFY_ORIENT, orientationValue=0.0, 
+                orientationType=SPECIFY_ORIENT, orientationValue=PASSIVE_ANGLE_ARRAY[i], 
                 additionalRotationType=ROTATION_NONE, additionalRotationField='', 
                 axis=AXIS_3, angle=0.0, numIntPoints=3)
             region2 = regionToolset.Region(faces=faces)
@@ -202,15 +214,15 @@ def CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, ACTIVE_ANGLE_ARRAY
                 axis=AXIS_3, angle=0.0, numIntPoints=3)
             compositeLayup.resume()
     else:
-        p = mdb.models[MODEL_NAME].parts['Part-1']
+        p = mdb.models[MODEL_NAME].parts[PART_NAME]
         f = p.faces
         faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
         region1 = regionToolset.Region(faces=faces)
-        p = mdb.models[MODEL_NAME].parts['Part-1']
+        p = mdb.models[MODEL_NAME].parts[PART_NAME]
         f = p.faces
         faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
         region2 = regionToolset.Region(faces=faces)
-        compositeLayup = mdb.models[MODEL_NAME].parts['Part-1'].CompositeLayup(
+        compositeLayup = mdb.models[MODEL_NAME].parts[PART_NAME].CompositeLayup(
             name='CompositeLayup-1', description='', elementType=SHELL, 
             offsetType=MIDDLE_SURFACE, symmetric=False, 
             thicknessAssignment=FROM_SECTION)
@@ -222,17 +234,17 @@ def CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, ACTIVE_ANGLE_ARRAY
         compositeLayup.suppress()
         compositeLayup.CompositePly(suppressed=False, plyName='Ply-1', region=region1, 
             material='Active', thicknessType=SPECIFY_THICKNESS, thickness=THICKNESS_PASSIVE, 
-            orientationType=SPECIFY_ORIENT, orientationValue=90.0, 
+            orientationType=SPECIFY_ORIENT, orientationValue=ANGLEPLY_PASSIVE, 
             additionalRotationType=ROTATION_NONE, additionalRotationField='', 
             axis=AXIS_3, angle=0.0, numIntPoints=3)
         compositeLayup.CompositePly(suppressed=False, plyName='Ply-2', region=region2, 
             material='Active', thicknessType=SPECIFY_THICKNESS, thickness=THICKNESS_ACTIVE, 
-            orientationType=SPECIFY_ORIENT, orientationValue=0.0, 
+            orientationType=SPECIFY_ORIENT, orientationValue=ANGLEPLY_ACTIVE, 
             additionalRotationType=ROTATION_NONE, additionalRotationField='', 
             axis=AXIS_3, angle=0.0, numIntPoints=3)
         compositeLayup.resume()
 
-def CreateMesh(MODEL_NAME, ASSEMBLY_NAME):
+def CreateMesh(MODEL_NAME, ASSEMBLY_NAME, MESH_SIZE):
     a = mdb.models[MODEL_NAME].rootAssembly
     partInstances =(a.instances[ASSEMBLY_NAME], )
     a.seedPartInstance(regions=partInstances, size=MESH_SIZE, deviationFactor=0.1, 
@@ -240,7 +252,7 @@ def CreateMesh(MODEL_NAME, ASSEMBLY_NAME):
     f1 = a.instances[ASSEMBLY_NAME].faces
     a.setMeshControls(regions=f1, elemShape=TRI, technique=STRUCTURED)
     elemType2 = mesh.ElemType(elemCode=S3RT, elemLibrary=EXPLICIT, 
-        secondOrderAccuracy=OFF)
+        secondOrderAccuracy=second_accuracy)
     f1 = a.instances[ASSEMBLY_NAME].faces
     region = a.Set(faces=f1, name='Set-mesh')
     a.setElementType(regions=region, elemTypes=(elemType2, elemType2))
@@ -251,17 +263,15 @@ def CreateStep(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME):
     mdb.models[MODEL_NAME].CoupledTempDisplacementStep(name=STEP_NAME, 
         previous=STEP_INITIAL_NAME, deltmx=10.0)
 
-def CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE_TEMPERATURE_END):
+def CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE_TEMPERATURE_END, second_accuracy=True):
     if partition:
         a = mdb.models[MODEL_NAME].rootAssembly
         f1 = a.instances[ASSEMBLY_NAME].faces
-        faces1 = f1.getSequenceFromMask(mask=('[#7fffff ]', ), )
-        region = a.Set(faces=faces1, name='Set-4')
+        region = a.Set(faces=f1, name='Set-4')
         mdb.models[MODEL_NAME].TemperatureBC(name='BC-1', createStepName=STEP_INITIAL_NAME, 
             region=region, distributionType=UNIFORM, fieldName='', magnitude=0.0)
         f1 = a.instances[ASSEMBLY_NAME].faces
-        faces1 = f1.getSequenceFromMask(mask=('[#7fffff ]', ), )
-        region = a.Set(faces=faces1, name='Set-5')
+        region = a.Set(faces=f1, name='Set-5')
         mdb.models[MODEL_NAME].boundaryConditions['BC-1'].setValuesInStep(
             stepName=STEP_NAME, magnitude=MAGNITUDE_TEMPERATURE_END)
     else:
@@ -277,6 +287,13 @@ def CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE
         region = a.Set(faces=faces1, name='Set-5')
         mdb.models[MODEL_NAME].boundaryConditions['BC-1'].setValuesInStep(
             stepName='Step-1', magnitude=MAGNITUDE_TEMPERATURE_END)
+        
+    a = mdb.models[MODEL_NAME].rootAssembly
+    e1 = a.instances['Assembly-1'].edges
+    edges1 = e1.getByBoundingBox(-0.0001,-10000,0,0.0001,10000,0)
+    region = a.Set(edges=edges1, name='Set-6')
+    mdb.models[MODEL_NAME].EncastreBC(name='BC-2', createStepName='Initial', 
+        region=region, localCsys=None)
 
 def CreateJob(MODEL_NAME, JOB_NAME, ANGLEPLY_ACTIVE, submit_job = True):
     mdb.Job(name=JOB_NAME, model=MODEL_NAME, description=str(ANGLEPLY_ACTIVE), type=ANALYSIS, 
@@ -295,7 +312,6 @@ def OpenODBandWriteResults(JOB_NAME, STEP_NAME, variable_name):
     Opens ODB file and returns displacement results at all nodes in the form of [[x1, y1, z1], [x2, y2, z2],...] in .txt format
     '''
     odb = session.openOdb(name = JOB_NAME + '.odb')
-    #initial_results = odb.steps[STEP_INITIAL_NAME]
     import numpy as np
     lastStep = odb.steps[STEP_NAME]
     lastFrame = lastStep.frames[1]
@@ -305,24 +321,44 @@ def OpenODBandWriteResults(JOB_NAME, STEP_NAME, variable_name):
     for node_value in data_array:
         a= node_value.data
         results_array.append(a) # leave space below for for loops!
-    np.savetxt(str(variable_name) + 'results' + '.txt', results_array, fmt='%s')
+    np.savetxt(JOB_NAME + str(variable_name) + 'results' + '.txt', results_array, fmt='%s')
+    
+length = 20
+MESH_SIZE_ARRAY = np.logspace(-1,1,length)
+active_thickness_array = np.logspace(0, 1, length)
+passive_thickness_array = np.logspace(0, 1, length) * 2
 
-CreatePart(MODEL_NAME, PART_NAME, GEOMETRY)
-CreateActiveMaterial(
-    MODEL_NAME, ACTIVE_MATERIAL_NAME,
-    E12_ACTIVE, E13_ACTIVE, E23_ACTIVE, 
-    MU12_ACTIVE, MU13_ACTIVE, MU23_ACTIVE, 
-    G12_ACTIVE, G13_ACTIVE, G23_ACTIVE,
-    ALPHA_EXPANSION_ACTIVE_12, ALPHA_EXPANSION_ACTIVE_13, ALPHA_EXPANSION_ACTIVE_23, DENSITY_ACTIVE, ALPHA_CONDUCTIVITY_ACTIVE, SP_HEAT_ACTIVE
-    )
-JOB_NAME = 'Job-triangle'
-CreatePartition(MODEL_NAME, PART_NAME, x, y)
-CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, ACTIVE_ANGLE_ARRAY)
+def ThicknessTest(active_thickness_array, passive_thickness_array, length):
+    CreatePart(MODEL_NAME, PART_NAME, GEOMETRY)
+    CreateActiveMaterial(
+        MODEL_NAME, ACTIVE_MATERIAL_NAME,
+        E12_ACTIVE, E13_ACTIVE, E23_ACTIVE, 
+        MU12_ACTIVE, MU13_ACTIVE, MU23_ACTIVE, 
+        G12_ACTIVE, G13_ACTIVE, G23_ACTIVE,
+        ALPHA_EXPANSION_ACTIVE_12, ALPHA_EXPANSION_ACTIVE_13, ALPHA_EXPANSION_ACTIVE_23, DENSITY_ACTIVE, ALPHA_CONDUCTIVITY_ACTIVE, SP_HEAT_ACTIVE
+        )
+    CreatePartition(MODEL_NAME, PART_NAME, x, y, partition=partition)
+    for i in range(0,length):
+        CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, PASSIVE_ANGLE_ARRAY, ACTIVE_ANGLE_ARRAY, 
+                                     THICKNESS_ACTIVE=active_thickness_array[i], THICKNESS_PASSIVE=passive_thickness_array[i], partition=partition)
+        CreateAssembly(MODEL_NAME, PART_NAME, ASSEMBLY_NAME)
+        CreateStep(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME)
+        CreateMesh(MODEL_NAME, ASSEMBLY_NAME, MESH_SIZE)
+        CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE_TEMPERATURE_END, second_accuracy=second_accuracy)
+        CreateJob(MODEL_NAME, JOB_NAME+str(i), ANGLEPLY_ACTIVE, submit_job = submit_job)
+        print(i)
+        OpenODBandWriteResults(JOB_NAME+str(i), STEP_NAME, variable_name)
+
+
+ThicknessTest(active_thickness_array, passive_thickness_array, length)
+
+
+'''
+CreateSubdivisionOrientation(MODEL_NAME, PART_NAME, x, y, PASSIVE_ANGLE_ARRAY, ACTIVE_ANGLE_ARRAY, partition=partition)
 CreateAssembly(MODEL_NAME, PART_NAME, ASSEMBLY_NAME)
 CreateStep(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME)
-CreateMesh(MODEL_NAME, ASSEMBLY_NAME)
-CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE_TEMPERATURE_END)
-CreateJob(MODEL_NAME, JOB_NAME, ANGLEPLY_ACTIVE, submit_job = True)
-    
-variable_name = 'U'
+CreateMesh(MODEL_NAME, ASSEMBLY_NAME, MESH_SIZE)
+CreateBoundaryConditions(MODEL_NAME, STEP_NAME, STEP_INITIAL_NAME, MAGNITUDE_TEMPERATURE_END, second_accuracy=second_accuracy)
+CreateJob(MODEL_NAME, JOB_NAME, ANGLEPLY_ACTIVE, submit_job = submit_job)
 OpenODBandWriteResults(JOB_NAME, STEP_NAME, variable_name)
+'''

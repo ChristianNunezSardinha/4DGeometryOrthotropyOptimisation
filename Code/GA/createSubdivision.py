@@ -4,9 +4,13 @@ import pygmsh
 
 # Copy-paste this in SendToAbaqus before running code. 
 POINT_1 = (0.0, 0.0)
-POINT_2 = (100.0, 0.0)
-POINT_3 = (0.0, 100.0)
-GEOMETRY = [POINT_1, POINT_2, POINT_3]
+POINT_2 = (10.0, 0.0)
+#POINT_3 = (0.0, 100.0)
+POINT_3 = (10.0, 1.0)
+POINT_4 = (0.0, 1.0)
+#GEOMETRY = [POINT_1, POINT_2, POINT_3]
+GEOMETRY = [POINT_1, POINT_2, POINT_3, POINT_4]
+partition_filename = 'C:\Temp/cantilevergeometrypartition.txt'
 
 ## Trying square geometry
 '''
@@ -23,7 +27,7 @@ def CreateSubdivision(GEOMETRY, plot=False):
     with pygmsh.geo.Geometry() as geom:
         geom.add_polygon(
             GEOMETRY,
-            mesh_size=15, # IMPORTANT VARIABLE
+            mesh_size=1, # IMPORTANT VARIABLE
         )
         mesh = geom.generate_mesh()   
     
@@ -45,8 +49,13 @@ def CreateSubdivision(GEOMETRY, plot=False):
         plt.plot(triangle_points[:, 0], triangle_points[:, 1], color='black')
 
     if plot:
-        plt.plot(triangle_points[:, 0], triangle_points[:, 1], color='black')
-        plt.scatter(connection_list_x, connection_list_y, label="Mesh Points", color = 'red', marker="x")
+        plt.plot(triangle_points[:, 0], triangle_points[:, 1], color='black', linewidth=2, markersize=8)
+        plt.scatter(connection_list_x, connection_list_y, label="Mesh Points", color = 'red', marker="x", s=50)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        plt.xlabel('x [mm]', fontsize=14)
+        plt.ylabel('y [mm]', fontsize=14)
+        plt.tight_layout()
         plt.show()
 
     return connection_list_x, connection_list_y
@@ -56,7 +65,7 @@ def CreateSubdivision(GEOMETRY, plot=False):
 def GetTxtFile(GEOMETRY, output_filename):
     x, y = CreateSubdivision(GEOMETRY, plot = True)
     data = np.column_stack((x, y))
-    np.savetxt('C:\Temp/' + output_filename, data, delimiter=',', fmt='%.18e')
-output_filename = 'SubdivisionCoordinatesCantilever.txt'
+    np.savetxt(output_filename, data, delimiter=',', fmt='%.18e')
+    print('File saved')
 
-GetTxtFile(GEOMETRY, output_filename)
+GetTxtFile(GEOMETRY, partition_filename)
